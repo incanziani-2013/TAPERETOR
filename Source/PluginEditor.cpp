@@ -200,28 +200,8 @@ TraperetorUI::TraperetorUI (TraperetorProcessor& p)
     // library browser
     bankBox.setTextWhenNothingSelected ("No banks yet");
     bankBox.onChange = [this] { proc.currentBank = bankBox.getText(); refreshList(); };
-    newBankBtn.onClick = [this]
-    {
-        auto* aw = new AlertWindow ("New bank", "Name your bank:", MessageBoxIconType::NoIcon);
-        aw->addTextEditor ("name", "", "");
-        aw->addButton ("Create", 1, KeyPress (KeyPress::returnKey));
-        aw->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
-        aw->enterModalState (true, ModalCallbackFunction::create ([safe = SafePointer<TraperetorUI> (this), aw] (int r)
-        { if (r == 1 && safe != nullptr) safe->createBank (aw->getTextEditorContents ("name")); }), true);
-    };
-    delBankBtn.onClick = [this]
-    {
-        if (proc.currentBank.isEmpty()) return;
-        const String name = proc.currentBank;
-        AlertWindow::showAsync (MessageBoxOptions::makeOptionsOkCancel (MessageBoxIconType::WarningIcon, "Delete bank",
-                                "Delete bank \"" + name + "\" and all the sounds inside it?", "Delete", "Cancel", this),
-                                [safe = SafePointer<TraperetorUI> (this), name] (int r)
-        {
-            if (r != 1 || safe == nullptr) return;
-            safe->proc.banks.remove (name); safe->proc.currentBank = {};
-            safe->refreshBanks(); safe->refreshList(); safe->say ("Bank deleted.");
-        });
-    };
+    newBankBtn.onClick = [this] { askNewBank(); };
+    delBankBtn.onClick = [this] { askDeleteBank(); };
     addBtn.onClick = [this]
     {
         chooser = std::make_unique<FileChooser> ("Choose oneshots", File(), "*.wav;*.aif;*.aiff;*.mp3;*.flac;*.ogg");
@@ -234,20 +214,7 @@ TraperetorUI::TraperetorUI (TraperetorProcessor& p)
         chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectDirectories,
                               [this] (const FileChooser& fc) { addToBank (fc.getResults()); });
     };
-    remBtn.onClick = [this]
-    {
-        const int row = list.getSelectedRow();
-        if (row < 0 || row >= (int) shown.size()) return;
-        const auto e = cur[(size_t) shown[(size_t) row]];
-        const String bank = proc.currentBank;
-        AlertWindow::showAsync (MessageBoxOptions::makeOptionsOkCancel (MessageBoxIconType::WarningIcon, "Remove sound",
-                                "Remove \"" + e.name + "\" from this bank?", "Remove", "Cancel", this),
-                                [safe = SafePointer<TraperetorUI> (this), bank, e] (int r)
-        {
-            if (r != 1 || safe == nullptr) return;
-            safe->proc.banks.removeSound (bank, e.file); safe->refreshList(); safe->say ("Sound removed.");
-        });
-    };
+    remBtn.onClick = [this] { askRemoveSound(); };
     search.setTextToShowWhenEmpty ("Search sounds...", Colours::grey);
     search.setColour (TextEditor::backgroundColourId, Colour (0xff1b1c1e));
     search.setColour (TextEditor::textColourId, Colour (0xffffb27d));
@@ -340,6 +307,52 @@ void TraperetorUI::pick (int row)
         say ("Loaded \"" + e.name + "\" into slot " + String (proc.selected.load() + 1) + (e.bpm > 0 ? "" : ". Set its ORIG BPM to use BPM SELECT."));
     else say ("Could not read " + e.file + ".");
     refreshSlots();
+}
+
+void TraperetorUI::askNewBank()
+{
+    auto* aw = new AlertWindow ("New bank", "Name your bank:", MessageBoxIconType::NoIcon);
+    aw->addTextEditor ("name", "", "");
+    aw->addButton ("Create", 1, KeyPress (KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
+    SafePointer<TraperetorUI> safe (this);
+    aw->enterModalState (true, ModalCallbackFunction::create ([safe, aw] (int r)
+    {
+        if (r == 1 && safe != nullptr) safe->createBank (aw->getTextEditorContents ("name"));
+    }), true);
+}
+
+void TraperetorUI::askDeleteBank()
+{
+    if (proc.currentBank.isEmpty()) return;
+    const String name = proc.currentBank;
+    SafePointer<TraperetorUI> safe (this);
+    AlertWindow::showAsync (MessageBoxOptions::makeOptionsOkCancel (MessageBoxIconType::WarningIcon, "Delete bank",
+                            "Delete bank \"" + name + "\" and all the sounds inside it?", "Delete", "Cancel", this),
+                            [safe, name] (int r)
+    {
+        if (r != 1 || safe == nullptr) return;
+        safe->proc.banks.remove (name);
+        safe->proc.currentBank = String();
+        safe->refreshBanks(); safe->refreshList(); safe->say ("Bank deleted.");
+    });
+}
+
+void TraperetorUI::askRemoveSound()
+{
+    const int row = list.getSelectedRow();
+    if (row < 0 || row >= (int) shown.size()) return;
+    const SoundEntry e = cur[(size_t) shown[(size_t) row]];
+    const String bank = proc.currentBank;
+    SafePointer<TraperetorUI> safe (this);
+    AlertWindow::showAsync (MessageBoxOptions::makeOptionsOkCancel (MessageBoxIconType::WarningIcon, "Remove sound",
+                            "Remove \"" + e.name + "\" from this bank?", "Remove", "Cancel", this),
+                            [safe, bank, e] (int r)
+    {
+        if (r != 1 || safe == nullptr) return;
+        safe->proc.banks.removeSound (bank, e.file);
+        safe->refreshList(); safe->say ("Sound removed.");
+    });
 }
 
 void TraperetorUI::createBank (const String& name)
