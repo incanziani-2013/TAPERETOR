@@ -55,6 +55,17 @@ void IndustrialLAF::drawToggleButton (Graphics& g, ToggleButton& b, bool, bool)
     g.drawText (b.getButtonText(), r.withTrimmedLeft (20).toNearestInt(), Justification::centredLeft);
 }
 
+void IndustrialLAF::drawTreeviewPlusMinusBox (Graphics& g, const Rectangle<float>& area, Colour, bool isOpen, bool)
+{
+    Path p;
+    const auto c = area.getCentre();
+    const float s = jmin (area.getWidth(), area.getHeight()) * 0.28f;
+    if (isOpen) p.addTriangle (c.x - s, c.y - s * 0.6f, c.x + s, c.y - s * 0.6f, c.x, c.y + s);
+    else        p.addTriangle (c.x - s * 0.6f, c.y - s, c.x + s, c.y, c.x - s * 0.6f, c.y + s);
+    g.setColour (orange());
+    g.fillPath (p);
+}
+
 void IndustrialLAF::drawButtonBackground (Graphics& g, Button& b, const Colour&, bool, bool down)
 {
     const auto r = b.getLocalBounds().toFloat().reduced (1.0f);
@@ -108,18 +119,71 @@ void WaveView::paint (Graphics& g)
 }
 
 // ---------------------------------------------------------------- UI
-void TraperetorUI::SoundModel::paintListBoxItem (int row, Graphics& g, int w, int h, bool sel)
+namespace
 {
-    if (row < 0 || row >= (int) ui.shown.size()) return;
-    const auto& e = ui.cur[(size_t) ui.shown[(size_t) row]];
-    if (sel) { g.setColour (IndustrialLAF::orange()); g.fillRect (0, 0, w, h); }
-    else if (row % 2) { g.setColour (Colour (0x14ffffff)); g.fillRect (0, 0, w, h); }
-    g.setColour (sel ? Colours::white : Colour (0xffdcdde0));
-    g.setFont (Font (FontOptions (14.0f, Font::bold)));
-    g.drawText (e.name, 8, 0, w - 70, h, Justification::centredLeft, true);
-    g.setColour (sel ? Colours::white : Colour (0xffffb27d));
-    g.setFont (Font (FontOptions (12.0f)));
-    g.drawText (e.bpm > 0 ? String (e.bpm, 1) : String ("--"), w - 62, 0, 56, h, Justification::centredRight);
+    struct FolderNode : public TreeViewItem
+    {
+        String name, path;
+        int count = 0;
+        FolderNode (const String& n, const String& p) : name (n), path (p) {}
+        bool mightContainSubItems() override { return true; }
+        String getUniqueName() const override { return "f:" + path; }
+        int getItemHeight() const override { return 24; }
+        void paintItem (Graphics& g, int w, int h) override
+        {
+            if (isSelected()) { g.setColour (Colour (0x33e8590c)); g.fillRect (0, 0, w, h); }
+            g.setColour (IndustrialLAF::orange());
+            g.fillRect (2, h / 2 - 5, 7, 3);
+            g.fillRect (2, h / 2 - 2, 15, 9);
+            g.setColour (Colours::white);
+            g.setFont (Font (FontOptions (14.0f, Font::bold)));
+            g.drawText (name, 24, 0, w - 74, h, Justification::centredLeft, true);
+            g.setColour (Colour (0xff9a9da1));
+            g.setFont (Font (FontOptions (12.0f)));
+            g.drawText (String (count), w - 48, 0, 42, h, Justification::centredRight);
+        }
+        void itemClicked (const MouseEvent&) override { setOpen (! isOpen()); }
+        void itemDoubleClicked (const MouseEvent&) override {}
+    };
+
+    struct SoundNode : public TreeViewItem
+    {
+        SoundEntry e;
+        std::function<void (const SoundEntry&)> onPick;
+        explicit SoundNode (const SoundEntry& s) : e (s) {}
+        bool mightContainSubItems() override { return false; }
+        String getUniqueName() const override { return "s:" + e.file; }
+        int getItemHeight() const override { return 24; }
+        void paintItem (Graphics& g, int w, int h) override
+        {
+            const bool sel = isSelected();
+            if (sel) { g.setColour (IndustrialLAF::orange()); g.fillRect (0, 0, w, h); }
+            g.setColour (sel ? Colours::white : Colour (0xffdcdde0));
+            g.setFont (Font (FontOptions (14.0f)));
+            g.drawText (e.name, 6, 0, w - 66, h, Justification::centredLeft, true);
+            g.setColour (sel ? Colours::white : Colour (0xffffb27d));
+            g.setFont (Font (FontOptions (12.0f)));
+            g.drawText (e.bpm > 0 ? String (e.bpm, 1) : String ("--"), w - 58, 0, 52, h, Justification::centredRight);
+        }
+        void itemClicked (const MouseEvent&) override { if (onPick) onPick (e); }
+    };
+
+    struct NodeCmp
+    {
+        static int compareElements (TreeViewItem* a, TreeViewItem* b)
+        {
+            const bool fa = dynamic_cast<FolderNode*> (a) != nullptr, fb = dynamic_cast<FolderNode*> (b) != nullptr;
+            if (fa != fb) return fa ? -1 : 1;
+            return a->getUniqueName().compareNatural (b->getUniqueName());
+        }
+    };
+
+    void openAll (TreeViewItem* it)
+    {
+        it->setOpen (true);
+        for (int i = 0; i < it->getNumSubItems(); ++i)
+            if (it->getSubItem (i)->mightContainSubItems()) openAll (it->getSubItem (i));
+    }
 }
 
 TraperetorUI::TraperetorUI (TraperetorProcessor& p)
@@ -220,16 +284,17 @@ TraperetorUI::TraperetorUI (TraperetorProcessor& p)
     search.setColour (TextEditor::textColourId, Colour (0xffffb27d));
     search.setColour (TextEditor::outlineColourId, IndustrialLAF::ink());
     search.setColour (TextEditor::focusedOutlineColourId, IndustrialLAF::orange());
-    search.onTextChange = [this] { refreshList(); };
-    list.setRowHeight (24);
-    list.setColour (ListBox::backgroundColourId, Colour (0xff1b1c1e));
-    list.setColour (ListBox::outlineColourId, IndustrialLAF::ink());
-    list.setOutlineThickness (2);
+    search.onTextChange = [this] { rebuildTree(); };
+    tree.setRootItemVisible (false);
+    tree.setDefaultOpenness (false);
+    tree.setIndentSize (18);
+    tree.setColour (TreeView::backgroundColourId, Colour (0xff1b1c1e));
+    tree.setColour (TreeView::linesColourId, Colours::transparentBlack);
     status.setFont (Font (FontOptions (13.0f)));
     status.setJustificationType (Justification::topLeft);
     status.setMinimumHorizontalScale (1.0f);
-    say ("Drop sounds or a folder anywhere on the plugin to add them to a bank. Click a sound to load it into the selected slot.");
-    for (auto* c : std::initializer_list<Component*> { &bankBox, &newBankBtn, &delBankBtn, &addBtn, &addFolderBtn, &remBtn, &search, &list, &status })
+    say ("Drop a folder anywhere on the plugin: it becomes a bank and its subfolders become categories you can open. Click a sound to load it into the selected slot.");
+    for (auto* c : std::initializer_list<Component*> { &bankBox, &newBankBtn, &delBankBtn, &addBtn, &addFolderBtn, &remBtn, &search, &tree, &status })
         addAndMakeVisible (c);
 
     keys.setAvailableRange (36, 96); keys.setLowestVisibleKey (48); keys.setKeyWidth (24.0f);
@@ -242,7 +307,7 @@ TraperetorUI::TraperetorUI (TraperetorProcessor& p)
     startTimerHz (10);
 }
 
-TraperetorUI::~TraperetorUI() { setLookAndFeel (nullptr); }
+TraperetorUI::~TraperetorUI() { tree.setRootItem (nullptr); rootItem.reset(); setLookAndFeel (nullptr); }
 
 int TraperetorUI::addPanel (const String& t, int row) { panels.push_back ({ t, {}, {}, row, {} }); return (int) panels.size() - 1; }
 
@@ -291,17 +356,52 @@ void TraperetorUI::refreshBanks()
 void TraperetorUI::refreshList()
 {
     cur = proc.banks.sounds (proc.currentBank);
-    shown.clear();
-    const String q = search.getText().trim();
-    for (int i = 0; i < (int) cur.size(); ++i)
-        if (q.isEmpty() || cur[(size_t) i].name.containsIgnoreCase (q)) shown.push_back (i);
-    list.updateContent(); list.repaint();
+    rebuildTree();
 }
 
-void TraperetorUI::pick (int row)
+void TraperetorUI::rebuildTree()
 {
-    if (row < 0 || row >= (int) shown.size()) return;
-    const auto& e = cur[(size_t) shown[(size_t) row]];
+    std::unique_ptr<XmlElement> st (tree.getOpennessState (true));
+    tree.setRootItem (nullptr);
+    rootItem.reset();
+
+    auto root = std::make_unique<FolderNode> ("", "");
+    NodeCmp cmp;
+    const String q = search.getText().trim();
+    for (const auto& e : cur)
+    {
+        if (q.isNotEmpty() && ! e.name.containsIgnoreCase (q)) continue;
+        std::vector<FolderNode*> chain { root.get() };
+        FolderNode* node = root.get();
+        for (const auto& part : StringArray::fromTokens (e.folder, "/", ""))
+        {
+            FolderNode* child = nullptr;
+            for (int i = 0; i < node->getNumSubItems(); ++i)
+                if (auto* f = dynamic_cast<FolderNode*> (node->getSubItem (i)))
+                    if (f->name == part) { child = f; break; }
+            if (child == nullptr)
+            {
+                child = new FolderNode (part, node->path.isEmpty() ? part : node->path + "/" + part);
+                node->addSubItemSorted (cmp, child);
+            }
+            node = child;
+            chain.push_back (node);
+        }
+        auto* sn = new SoundNode (e);
+        sn->onPick = [this] (const SoundEntry& s) { pickEntry (s); };
+        node->addSubItemSorted (cmp, sn);
+        for (auto* c : chain) ++c->count;
+    }
+    rootItem = std::move (root);
+    tree.setRootItem (rootItem.get());
+    rootItem->setOpen (true);
+    if (q.isNotEmpty()) openAll (rootItem.get());
+    else if (st != nullptr) tree.restoreOpennessState (*st, true);
+    tree.repaint();
+}
+
+void TraperetorUI::pickEntry (const SoundEntry& e)
+{
     const auto f = proc.banks.bankDir (proc.currentBank).getChildFile (e.file);
     if (proc.loadFile (f, proc.selected.load(), e.bpm))
         say ("Loaded \"" + e.name + "\" into slot " + String (proc.selected.load() + 1) + (e.bpm > 0 ? "" : ". Set its ORIG BPM to use BPM SELECT."));
@@ -340,9 +440,9 @@ void TraperetorUI::askDeleteBank()
 
 void TraperetorUI::askRemoveSound()
 {
-    const int row = list.getSelectedRow();
-    if (row < 0 || row >= (int) shown.size()) return;
-    const SoundEntry e = cur[(size_t) shown[(size_t) row]];
+    auto* sn = dynamic_cast<SoundNode*> (tree.getSelectedItem (0));
+    if (sn == nullptr) { say ("Select a sound in the list first."); return; }
+    const SoundEntry e = sn->e;
     const String bank = proc.currentBank;
     SafePointer<TraperetorUI> safe (this);
     AlertWindow::showAsync (MessageBoxOptions::makeOptionsOkCancel (MessageBoxIconType::WarningIcon, "Remove sound",
@@ -361,46 +461,58 @@ void TraperetorUI::createBank (const String& name)
     else say ("Could not create that bank.");
 }
 
-static Array<File> audioIn (const File& dir)
-{
-    Array<File> r;
-    for (const auto& f : dir.findChildFiles (File::findFiles, true, "*")) if (isAudioFile (f)) r.add (f);
-    r.sort();
-    return r;
-}
-
 void TraperetorUI::addToBank (const Array<File>& paths)
 {
-    Array<File> loose, copiedAll;
-    int total = 0;
-    String lastBank;
-    for (const auto& f : paths)
-    {
-        if (f.isDirectory())
-        {
-            const auto files = audioIn (f);
-            if (files.isEmpty()) continue;
-            const String b = File::createLegalFileName (f.getFileName());
-            proc.banks.create (b);
-            copiedAll.addArray (proc.banks.addFiles (b, files));
-            total += files.size(); lastBank = b;
-        }
-        else loose.add (f);
-    }
+    if (copying) { say ("Still copying a folder, please wait..."); return; }
+    Array<File> loose, dirs;
+    for (const auto& f : paths) (f.isDirectory() ? dirs : loose).add (f);
+
     if (loose.size() > 0)
     {
-        if (proc.currentBank.isEmpty() && lastBank.isEmpty()) { proc.banks.create ("My Bank"); lastBank = "My Bank"; }
-        const String b = lastBank.isNotEmpty() && proc.currentBank.isEmpty() ? lastBank : proc.currentBank;
-        const auto added = proc.banks.addFiles (b, loose);
-        copiedAll.addArray (added); total += added.size(); lastBank = b;
+        if (proc.currentBank.isEmpty()) { proc.banks.create ("My Bank"); proc.currentBank = "My Bank"; }
+        const auto added = proc.banks.addFiles (proc.currentBank, loose);
+        if (added.isEmpty()) say ("No audio files found (WAV, AIFF, MP3, FLAC, OGG).");
+        else
+        {
+            refreshBanks(); refreshList();
+            Array<File> toLoad; for (int i = 0; i < jmin (8, added.size()); ++i) toLoad.add (added[i]);
+            proc.loadFiles (toLoad, proc.selected.load());
+            refreshSlots();
+            say (String (added.size()) + " sound" + (added.size() > 1 ? "s" : "") + " added to bank \"" + proc.currentBank + "\" and loaded into the slots.");
+        }
     }
-    if (total == 0) { say ("No audio files found (WAV, AIFF, MP3, FLAC, OGG)."); return; }
-    proc.currentBank = lastBank;
-    refreshBanks(); refreshList();
-    Array<File> toLoad; for (int i = 0; i < jmin (8, copiedAll.size()); ++i) toLoad.add (copiedAll[i]);
-    proc.loadFiles (toLoad, proc.selected.load());
-    refreshSlots();
-    say (String (total) + " sound" + (total > 1 ? "s" : "") + " added to bank \"" + lastBank + "\". The first ones were loaded into the slots.");
+
+    if (dirs.size() > 0)
+    {
+        copying = true;
+        say ("Copying folder into your library... this can take a while for big kits.");
+        BankManager bm = proc.banks;
+        SafePointer<TraperetorUI> safe (this);
+        Thread::launch ([bm, dirs, safe]() mutable
+        {
+            int total = 0, folders = 0;
+            String lastBank;
+            for (const auto& d : dirs)
+            {
+                const String b = File::createLegalFileName (d.getFileName());
+                bm.create (b);
+                int fo = 0;
+                const int n = bm.addFolder (b, d, &fo);
+                if (n == 0) { bm.remove (b); continue; }
+                total += n; folders += fo; lastBank = b;
+            }
+            MessageManager::callAsync ([safe, total, folders, lastBank]()
+            {
+                if (safe == nullptr) return;
+                safe->copying = false;
+                if (total == 0) { safe->say ("No audio files found in that folder (WAV, AIFF, MP3, FLAC, OGG)."); return; }
+                safe->proc.currentBank = lastBank;
+                safe->refreshBanks(); safe->refreshList();
+                safe->say (String (total) + " sounds added to bank \"" + lastBank + "\"" + (folders > 0 ? " in " + String (folders) + " folder" + (folders > 1 ? "s" : "") : String())
+                           + ". Open a folder in the list and click a sound to load it into the selected slot.");
+            });
+        });
+    }
 }
 
 void TraperetorUI::filesDropped (const StringArray& files, int, int)
@@ -454,7 +566,7 @@ void TraperetorUI::resized()
     addBtn.setBounds (bx + 14, by + 98, cw, 24);           addFolderBtn.setBounds (bx + 20 + cw, by + 98, cw, 24);
     remBtn.setBounds (bx + 14, by + 126, bw - 28, 24);
     search.setBounds (bx + 14, by + 158, bw - 28, 24);
-    list.setBounds (bx + 14, by + 188, bw - 28, bh - 188 - 108);
+    tree.setBounds (bx + 14, by + 188, bw - 28, bh - 188 - 108);
     status.setBounds (bx + 14, by + bh - 100, bw - 28, 92);
 
     // slots strip
