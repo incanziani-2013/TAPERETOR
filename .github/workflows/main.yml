@@ -15,3 +15,19 @@ jobs:
         with:
           name: TRAPERETOR-VST3-Windows
           path: build/TRAPERETOR_artefacts/Release/VST3/TRAPERETOR.vst3
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+      - name: Sign and zip
+        run: |
+          codesign --force --deep -s - build/TRAPERETOR_artefacts/Release/VST3/TRAPERETOR.vst3
+          ditto -c -k --keepParent build/TRAPERETOR_artefacts/Release/VST3/TRAPERETOR.vst3 TRAPERETOR-VST3-macOS.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TRAPERETOR-VST3-macOS
+          path: TRAPERETOR-VST3-macOS.zip
