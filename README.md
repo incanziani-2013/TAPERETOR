@@ -19,10 +19,27 @@ Drop your oneshots on the plugin window, play them from MIDI, and shape them wit
 ## Build with GitHub (no setup on your PC)
 1. Create a repo and push this folder to it.
 2. Open the **Actions** tab. The `Build plugin` workflow runs on every push (or press *Run workflow*).
-3. When it finishes, download the artifact `TRAPERETOR-VST3-Windows` (or `-macOS`).
+3. When it finishes, download the artifact `TRAPERETOR-Windows` or `TRAPERETOR-macOS`. Each one contains:
+   - `TRAPERETOR-<version>-Windows-Setup.exe` / `TRAPERETOR-<version>-macOS-Setup.pkg`: an installer that lets you pick VST3 and/or VST2.
+   - `TRAPERETOR-<version>-<OS>-Plugins.zip`: the raw plugin files, for manual install.
+
+### Releases
+Bump `VERSION` in `CMakeLists.txt`, then push a matching tag:
+
+    git tag v1.0.0
+    git push origin v1.0.0
+
+The workflow builds everything and publishes the installers in a GitHub Release.
+
+### VST2
+Steinberg no longer distributes the VST2 SDK, so it is not in this repo and VST2 is only built when you provide it. Add **one** of these repository secrets (Settings > Secrets and variables > Actions):
+- `VST2_SDK_URL`: a direct download link to a `.zip` of the SDK.
+- `VST2_SDK_ZIP_BASE64`: the `.zip` encoded as base64. Only the `pluginterfaces/vst2.x/` folder is needed, which keeps it small enough for a secret (on macOS/Linux: `base64 -i vst2sdk.zip`; on Windows: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("vst2sdk.zip"))`).
+
+The zip must contain `pluginterfaces/vst2.x/aeffect.h` (at any depth). Without a secret, the build skips VST2 and the installers only offer VST3. You need a VST2 license agreement with Steinberg to distribute VST2 plugins.
 
 ## Install in FL Studio
-1. Copy `TRAPERETOR.vst3` to `C:\Program Files\Common Files\VST3\` (macOS: `/Library/Audio/Plug-Ins/VST3/`).
+1. Run the installer. It puts the VST3 in `C:\Program Files\Common Files\VST3\` (macOS: `/Library/Audio/Plug-Ins/VST3/`) and lets you choose the VST2 folder on Windows (default `C:\Program Files\Common Files\VST2\`; macOS: `/Library/Audio/Plug-Ins/VST/`). For a manual install, copy the files from the Plugins zip to those folders.
 2. In FL Studio: Options > Manage plugins > **Find installed plugins** (Verify plugins).
 3. Add it from the plugin database: Installed > Plugin database > VST3 > TRAPERETOR. It is a generator (instrument).
 
@@ -32,10 +49,11 @@ Requires CMake 3.22+ and a C++17 compiler (Visual Studio 2022 on Windows, Xcode 
     cmake -B build -DCMAKE_BUILD_TYPE=Release
     cmake --build build --config Release
 
-The plugin ends up in `build/TRAPERETOR_artefacts/Release/VST3/`. A Standalone app is built too, for quick testing.
+The plugin ends up in `build/TRAPERETOR_artefacts/Release/VST3/`. To also build VST2, add `-DVST2_SDK_PATH=<folder containing pluginterfaces/vst2.x>` to the first command. A Standalone app is built too, for quick testing.
 
 ## Notes
-- macOS builds are unsigned: you may need to allow them in System Settings > Privacy & Security.
+- macOS builds and the `.pkg` installer are not notarized: right-click > Open the installer, or allow it in System Settings > Privacy & Security.
+- The Windows installer is unsigned, so SmartScreen may warn: click *More info* > *Run anyway*.
 - JUCE is downloaded automatically by CMake and is licensed under AGPLv3/commercial. If you distribute this plugin, check the JUCE license terms.
 
 ## License
