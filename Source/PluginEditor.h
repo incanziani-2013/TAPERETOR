@@ -8,6 +8,7 @@ struct IndustrialLAF : public juce::LookAndFeel_V4
     IndustrialLAF();
     void drawRotarySlider (juce::Graphics&, int x, int y, int w, int h, float pos, float a0, float a1, juce::Slider&) override;
     void drawToggleButton (juce::Graphics&, juce::ToggleButton&, bool, bool) override;
+    void drawTreeviewPlusMinusBox (juce::Graphics&, const juce::Rectangle<float>&, juce::Colour, bool isOpen, bool) override;
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool, bool) override;
     juce::Font getTextButtonFont (juce::TextButton&, int) override;
     static juce::Colour orange() { return juce::Colour (0xffe8590c); }
@@ -44,20 +45,13 @@ public:
 private:
     struct Knob { juce::Slider s; juce::Label l; std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> a; };
     struct Panel { juce::String title; std::vector<Knob*> knobs; std::vector<juce::Component*> extras; int row; juce::Rectangle<int> r; };
-    struct SoundModel : public juce::ListBoxModel
-    {
-        explicit SoundModel (TraperetorUI& u) : ui (u) {}
-        int getNumRows() override { return (int) ui.shown.size(); }
-        void paintListBoxItem (int row, juce::Graphics&, int w, int h, bool sel) override;
-        void listBoxItemClicked (int row, const juce::MouseEvent&) override { ui.pick (row); }
-        TraperetorUI& ui;
-    };
 
     void timerCallback() override;
     void refreshSlots();
     void refreshBanks();
     void refreshList();
-    void pick (int row);
+    void rebuildTree();
+    void pickEntry (const SoundEntry&);
     void addToBank (const juce::Array<juce::File>&);
     void createBank (const juce::String&);
     void askNewBank();
@@ -81,11 +75,11 @@ private:
     juce::TextButton newBankBtn { "NEW BANK" }, delBankBtn { "DELETE BANK" }, addBtn { "ADD SOUNDS" },
                      addFolderBtn { "ADD FOLDER" }, remBtn { "REMOVE SOUND" };
     juce::TextEditor search;
-    SoundModel model { *this };
-    juce::ListBox list { "sounds", &model };
+    juce::TreeView tree;
+    std::unique_ptr<juce::TreeViewItem> rootItem;
+    bool copying = false;
     juce::Label status;
     std::vector<SoundEntry> cur;
-    std::vector<int> shown;
 
     juce::MidiKeyboardComponent keys;
     std::unique_ptr<juce::FileChooser> chooser;
