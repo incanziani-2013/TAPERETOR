@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <set>
 using namespace juce;
 
 // ---------------------------------------------------------------- helpers
@@ -113,6 +114,11 @@ bool BankManager::create (const String& name)
 
 bool BankManager::remove (const String& name) { return bankDir (name).deleteRecursively(); }
 
+String BankManager::relPath (const String& bank, const File& f) const
+{
+    return f.getRelativePathFrom (bankDir (bank)).replaceCharacter ('\\', '/');
+}
+
 std::vector<SoundEntry> BankManager::sounds (const String& bank) const
 {
     std::vector<SoundEntry> v;
@@ -122,11 +128,15 @@ std::vector<SoundEntry> BankManager::sounds (const String& bank) const
     const auto js = JSON::parse (dir.getChildFile ("bank.json"));
     if (auto* a = js["sounds"].getArray())
         for (auto& x : *a) bpms[x["file"].toString()] = (double) x["bpm"];
-    auto files = dir.findChildFiles (File::findFiles, false, "*");
+    auto files = dir.findChildFiles (File::findFiles, true, "*");
     files.sort();
     for (const auto& f : files)
         if (isAudioFile (f))
-            v.push_back ({ f.getFileNameWithoutExtension(), f.getFileName(), bpms.count (f.getFileName()) ? bpms[f.getFileName()] : 0.0 });
+        {
+            const String rel = relPath (bank, f);
+            const String folder = rel.contains ("/") ? rel.upToLastOccurrenceOf ("/", false, false) : String();
+            v.push_back ({ f.getFileNameWithoutExtension(), rel, folder, bpms.count (rel) ? bpms[rel] : 0.0 });
+        }
     return v;
 }
 
@@ -158,6 +168,28 @@ Array<File> BankManager::addFiles (const String& bank, const Array<File>& files)
     }
     write (bank, sounds (bank));
     return added;
+}
+
+int BankManager::addFolder (const String& bank, const File& source, int* foldersOut)
+{
+    const auto dir = bankDir (bank);
+    dir.createDirectory();
+    int n = 0;
+    std::set<String> folders;
+    for (const auto& f : source.findChildFiles (File::findFiles, true, "*"))
+    {
+        if (! isAudioFile (f)) continue;
+        const String rel = f.getRelativePathFrom (source).replaceCharacter ('\\', '/');
+        auto dest = dir.getChildFile (rel);
+        if (dest == f) { ++n; continue; }
+        dest.getParentDirectory().createDirectory();
+        if (dest.existsAsFile())
+            dest = dest.getParentDirectory().getNonexistentChildFile (dest.getFileNameWithoutExtension(), dest.getFileExtension(), false);
+        if (f.copyFileTo (dest)) { ++n; if (rel.contains ("/")) folders.insert (rel.upToLastOccurrenceOf ("/", false, false)); }
+    }
+    write (bank, sounds (bank));
+    if (foldersOut) *foldersOut = (int) folders.size();
+    return n;
 }
 
 void BankManager::removeSound (const String& bank, const String& file)
@@ -518,7 +550,7 @@ void TraperetorProcessor::setSlotBpm (int slot, double bpm)
     auto n = std::make_shared<Sample> (*s);
     n->bpm = bpm;
     { const SpinLock::ScopedLockType lk (slotLock); slots[(size_t) slot] = n; }
-    if (n->bank.isNotEmpty()) banks.setBpm (n->bank, File (n->path).getFileName(), bpm);
+    if (n->bank.isNotEmpty()) banks.setBpm (n->bank, banks.relPath (n->bank, File (n->path)), bpm);
     retempo (slot);
     ++slotsVersion;
 }
@@ -534,12 +566,14 @@ bool TraperetorProcessor::loadFile (const File& f, int slot, double bpmHint)
     s->fwd = s->orig;
     s->rev.makeCopyOf (s->fwd); s->rev.reverse (0, len);
     s->sr = rd->sampleRate; s->name = f.getFileNameWithoutExtension(); s->path = f.getFullPathName();
-    const auto par = f.getParentDirectory();
-    if (par.getParentDirectory() == banks.root())
-    {
-        s->bank = par.getFileName();
-        for (const auto& e : banks.sounds (s->bank)) if (e.file == f.getFileName()) s->bpm = e.bpm;
-    }
+    for (auto a = f.getParentDirectory(); a != a.getParentDirectory(); a = a.getParentDirectory())
+        if (a.getParentDirectory() == banks.root())
+        {
+            s->bank = a.getFileName();
+            const String rel = banks.relPath (s->bank, f);
+            for (const auto& e : banks.sounds (s->bank)) if (e.file == rel) s->bpm = e.bpm;
+            break;
+        }
     if (bpmHint > 0.0) s->bpm = bpmHint;
     { const SpinLock::ScopedLockType lk (slotLock); slots[(size_t) jlimit (0, 7, slot)] = s; }
     ++slotsVersion;
