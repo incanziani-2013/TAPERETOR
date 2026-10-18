@@ -60,6 +60,9 @@ private:
     void pick (int row);
     void addToBank (const juce::Array<juce::File>&);
     void createBank (const juce::String&);
+    void askNewBank();
+    void askDeleteBank();
+    void askRemoveSound();
     void say (const juce::String& s) { status.setText (s, juce::dontSendNotification); }
     int addPanel (const juce::String& t, int row);
     void addKnob (int panel, const char* id, const char* label);
