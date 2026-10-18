@@ -25,7 +25,12 @@ component() {
   cp -R "$bundle" "$root/"
   # Keep the installer from "relocating" the bundle to another copy it finds on disk.
   pkgbuild --analyze --root "$root" "$plist"
-  /usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$plist"
+  # pkgbuild may not detect any bundle (the plist is then an empty array), so only patch the entries it found.
+  local i=0
+  while /usr/libexec/PlistBuddy -c "Print :$i" "$plist" >/dev/null 2>&1; do
+    /usr/libexec/PlistBuddy -c "Set :$i:BundleIsRelocatable false" "$plist"
+    i=$((i + 1))
+  done
   pkgbuild --root "$root" --component-plist "$plist" --identifier "$ID.$kind" \
     --version "$VERSION" --install-location "$location" "$WORK/pkgs/$pkg"
   OUTLINE+="    <line choice=\"$kind\"/>"$'\n'
