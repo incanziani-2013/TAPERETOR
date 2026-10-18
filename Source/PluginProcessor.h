@@ -17,7 +17,7 @@ struct Sample
     double appliedTarget = 0.0, appliedOrig = 0.0;
 };
 
-struct SoundEntry { juce::String name, file; double bpm = 0.0; };
+struct SoundEntry { juce::String name, file, folder; double bpm = 0.0; };   // file/folder are relative to the bank folder, using "/"
 
 class BankManager
 {
@@ -30,6 +30,8 @@ public:
     bool remove (const juce::String& name);
     std::vector<SoundEntry> sounds (const juce::String& bank) const;
     juce::Array<juce::File> addFiles (const juce::String& bank, const juce::Array<juce::File>& files);
+    int addFolder (const juce::String& bank, const juce::File& source, int* foldersOut = nullptr);   // keeps the subfolder structure
+    juce::String relPath (const juce::String& bank, const juce::File& f) const;
     void removeSound (const juce::String& bank, const juce::String& file);
     void setBpm (const juce::String& bank, const juce::String& file, double bpm);
 private:
